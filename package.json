@@ -1,0 +1,30 @@
+{
+  "name": "vinmt_tg",
+  "version": "0.0.1",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/entyen/vinmt_tg.git"
+  },
+  "author": "Entyen",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/entyen/vinmt_tg/issues"
+  },
+  "homepage": "https://github.com/entyen/vinmt_tg#readme",
+  "dependencies": {
+    "@grammyjs/menu": "^1.0.4",
+    "@satont/grammy-mongodb-storage": "^1.1.0",
+    "grammy": "^1.7.0",
+    "mongoose": "^6.2.0",
+    "mongoose-sequence": "^5.3.1"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.15"
+  }
+}
