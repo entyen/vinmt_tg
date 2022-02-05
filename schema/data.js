@@ -46,7 +46,7 @@ const accountSchem = new mongoose.Schema({
 })
 
 const charSchem = new mongoose.Schema({
-    name: {type: String, unique: true},
+    name: {type: String, unique: true, required: true},
     balance: {
         type: Number,
         default: 0,

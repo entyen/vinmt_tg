@@ -1,10 +1,7 @@
-const { Bot, Keyboard } = require('grammy')
+const { Bot, Keyboard, session, SessionFlavor } = require('grammy')
 const { Menu } = require('@grammyjs/menu')
 const mongoose = require('mongoose')
 const AutoIncrement = require('mongoose-sequence')(mongoose)
-const MongoStorage = require('@satont/grammy-mongodb-storage')
-// const collection = mongoose < MongoStorage.ISession > ('create_char', 'main')
-// new MongoStorage.MongoDBAdapter({ collection })
 
 const timestamp = Date.now() + 10800000
 
@@ -22,9 +19,26 @@ const accdb = mongoose.model(
 )
 const chardb = mongoose.model('characters', charSchem)
 
+function getLocale(ulang, string, ...vars) {
+    let lang = JSON.parse(fs.readFileSync(`./lang/${ulang}.json`, 'utf-8'))
+    lang = lang[string]
+
+    let count = 0
+    lang = lang
+        .replace(/%VAR%/, () => (vars[count] !== null ? vars[count] : '%VAR%'))
+        .replace(/%VAR%/, () =>
+            vars[count++] !== null ? vars[count++] : '%VAR%'
+        )
+
+    return lang
+}
+
 //MiddleWire Test
 async function middleCheck(ctx, next) {
     if (ctx.from) {
+        if (ctx.from.language_code != 'en' && ctx.from.language_code != 'ru') {
+            ctx.from.language_code = 'en'
+        }
         ctx.account = await accdb.findOne({ tgid: ctx.from.id })
         if (ctx.account) {
             await next()
@@ -34,7 +48,7 @@ async function middleCheck(ctx, next) {
                 await next()
                 return
             }
-            ctx.reply('У вас нет аккаунта введите /start')
+            ctx.reply(getLocale(ctx.from.language_code, 'noAccount'))
             await next()
             return
         }
@@ -42,23 +56,117 @@ async function middleCheck(ctx, next) {
     await next()
 }
 
-const menu = new Menu('my-menu-identifier')
-    .text('A', (ctx) => ctx.reply('You pressed A!'))
+const charScreen = new Menu('charScreen')
+    .text('Выбрать 1-го', async (ctx) => {
+        if (ctx.account.char[0].equiped) {
+            ctx.deleteMessage()
+            ctx.reply(`Персонаж уже выбран`)
+            return
+        }
+        const char = ctx.account.char[0]
+            ? await chardb.findById(ctx.account.char[0].charid)
+            : null
+        ctx.account.char[0].equiped = true
+        await ctx.account.save()
+        ctx.deleteMessage()
+        ctx.reply(`Выбран персонаж ${char.name}`)
+    })
     .row()
-    .text('B', (ctx) => ctx.reply('You pressed B!'))
+    .submenu(
+        (ctx) => getLocale(ctx.account.lang, 'create'),
+        'charCreate',
+        (ctx) => {
+            if (ctx.account.char.length > 0) {
+                ctx.editMessageText(getLocale(ctx.account.lang, 'haveChar'))
+                return
+            }
+            ctx.editMessageText(getLocale(ctx.account.lang, 'createChar'))
+            ctx.session.createChar = 1
+        }
+    )
 
-const keyboard = (ctx, lang) =>
+const charCreate = new Menu('charCreate').back(
+    (ctx) => getLocale(ctx.account.lang, 'back'),
+    async (ctx) => {
+        const char = ctx.account.char[0]
+            ? await chardb.findById(ctx.account.char[0].charid)
+            : null
+        ctx.editMessageText(
+            `${getLocale(ctx.account.lang, 'charList')}\n${
+                char
+                    ? `👤 ${char.name}                 ${
+                          ctx.account.char[0].equiped ? 'Выбран' : 'Не Выбран'
+                      }`
+                    : 'Персонажей Нет'
+            }`
+        )
+        ctx.session.createChar = 0
+    }
+)
+
+charScreen.register(charCreate)
+
+const menu = new Menu('mainMenu')
+    .text(
+        (ctx) => getLocale(ctx.account.lang, 'crafts'),
+        (ctx) => ctx.reply('test')
+    )
+    .text(
+        (ctx) => getLocale(ctx.account.lang, 'market'),
+        (ctx) => ctx.reply('test')
+    )
+    .row()
+    .text(
+        (ctx) => getLocale(ctx.account.lang, 'char'),
+        (ctx) => ctx.reply('test')
+    )
+    .text(
+        (ctx) => getLocale(ctx.account.lang, 'setting'),
+        (ctx) => ctx.reply('test')
+    )
+    .text(
+        (ctx) => getLocale(ctx.account.lang, 'balance', 0),
+        (ctx) => ctx.reply('test')
+    )
+
+const keyboard = (ctx) =>
     new Keyboard()
-        .text(lang.crafts)
-        .text(lang.market)
+        .text(getLocale(ctx.from.language_code, 'crafts'))
+        .text(getLocale(ctx.from.language_code, 'market'))
         .row()
-        .text(lang.create)
-        .text(lang.setting)
-        .text(`0 ${lang.curr}`)
+        .text(getLocale(ctx.from.language_code, 'char'))
+        .text(getLocale(ctx.from.language_code, 'setting'))
+        .text(getLocale(ctx.from.language_code, 'balance', 0))
         .row()
-        .text(lang.land)
+        .text(getLocale(ctx.from.language_code, 'menu'))
 
-bot.use(menu, middleCheck)
+const keyboardAcc = (ctx) =>
+    new Keyboard()
+        .text(getLocale(ctx.account.lang, 'crafts'))
+        .text(getLocale(ctx.account.lang, 'market'))
+        .row()
+        .text(getLocale(ctx.account.lang, 'char'))
+        .text(getLocale(ctx.account.lang, 'setting'))
+        .text(getLocale(ctx.account.lang, 'balance', 0))
+        .row()
+        .text(getLocale(ctx.account.lang, 'menu'))
+
+const MongoStorage = require('@satont/grammy-mongodb-storage')
+const collection = mongoose.connection.collection('sessions')
+
+function initial() {
+    return { session: 0, createChar: 0 }
+}
+
+bot.use(
+    middleCheck,
+    session({
+        initial,
+        storage: new MongoStorage.MongoDBAdapter({ collection: collection }),
+    }),
+    menu,
+    charScreen
+)
 
 bot.command('start', async (ctx) => {
     if (ctx.message.chat.id < 0) return
@@ -79,37 +187,89 @@ bot.command('start', async (ctx) => {
             lang: ctx.from.language_code,
         })
         ctx.reply(lang.welcome.replace('<user>', ctx.from.first_name), {
-            reply_markup: keyboard(ctx, lang),
+            reply_markup: keyboard(ctx),
         })
         return
     } else {
         ctx.reply(lang.welcome.replace('<user>', ctx.account.first_name), {
-            reply_markup: keyboard(ctx, lang),
+            reply_markup: keyboardAcc(ctx),
         })
         return
     }
 })
 
 // Handle other messages.
-bot.on('message', (ctx) => {
+bot.on('message', async (ctx) => {
     if (!ctx.account) return
+    const charAll = await chardb.find()
+    const char = ctx.account.char[0]
+        ? await chardb.findById(ctx.account.char[0].charid)
+        : null
     const date = new Date(ctx.account._id.getTimestamp())
     let lang = JSON.parse(
         fs.readFileSync(`./lang/${ctx.account.lang}.json`, 'utf-8')
     )
-    console.log(ctx.message.text)
-    switch (ctx.message.text) {
-        case lang.crafts:
-            ctx.reply(date.toTimeString())
-            break
-        default:
-            ctx.reply('kb', {
-                reply_markup: {
-                    input_field_placeholder: 'КРИНЖ',
-                    keyboard: keyboard(ctx, lang).build(),
-                },
+    if (ctx.session.createChar == 1) {
+        if (ctx.message.text.length > 8 || ctx.message.text.length < 5) {
+            ctx.reply(lang.ceateForb)
+            ctx.session.createChar = 0
+            return
+        }
+        if (!ctx.message.text.match(/[0-9a-zA-Z]/g)) {
+            ctx.reply(lang.ceateForb)
+            ctx.session.createChar = 0
+            return
+        }
+        if (!!charAll.find((x) => x.name == ctx.message.text)) {
+            ctx.reply(lang.haveCharName)
+            ctx.session.createChar = 0
+            return
+        }
+        await chardb
+            .create({
+                name: ctx.message.text,
             })
-            break
+            .then(async (x) => {
+                ctx.account.char.unshift({ charid: x._id })
+                ctx.reply(lang.charCreated.replace('<name>', ctx.message.text))
+                await ctx.account.save()
+            })
+        ctx.session.createChar = 0
+    }
+    if (ctx.message.text == lang.create) {
+        if (ctx.account.char.length > 0) return ctx.reply(lang.haveChar)
+        ctx.reply(lang.createChar)
+        ctx.session.createChar++
+    }
+    if (ctx.message.text == getLocale(ctx.account.lang, 'char')) {
+        ctx.reply(
+            `${getLocale(ctx.account.lang, 'charList')}\n${
+                char
+                    ? `👤 ${char.name}                 ${
+                          ctx.account.char[0].equiped ? 'Выбран' : 'Не Выбран'
+                      }`
+                    : 'Персонажей Нет'
+            }`,
+            {
+                reply_markup: charScreen,
+            }
+        )
+    }
+    if (ctx.message.text == getLocale(ctx.account.lang, 'menu')) {
+        ctx.reply(
+            getLocale(
+                ctx.account.lang,
+                'mainMenu',
+                ctx.account.uid,
+                ctx.account.first_name
+            ),
+            { reply_markup: menu }
+        )
+    }
+    if (ctx.message.text == lang.crafts) {
+        ctx.reply(date.toTimeString(), {
+            reply_markup: keyboardAcc(ctx),
+        })
     }
 })
 
