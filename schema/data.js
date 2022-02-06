@@ -30,11 +30,18 @@ const accountSchem = new mongoose.Schema({
     username: { type: String },
     first_name: { type: String, required: true },
     lang: { type: String, default: "en" },
+    donate: {
+        type: Number,
+        default: 0,
+        get: (v) => Math.floor(v),
+        set: (v) => Math.floor(v),
+    },
     alert: { type: Number, default: 0 },
     acclvl: { type: Number, default: 0 },
+    charSlots: { type: Number, default: 0 },
     char: [
         {
-            charid: {
+            _id: {
                 type: mongoose.Schema.Types.ObjectId,
                 ref: "characters",
                 required: true,

@@ -1,5 +1,5 @@
 const { Bot, Keyboard, session, SessionFlavor } = require('grammy')
-const { Menu } = require('@grammyjs/menu')
+const { Menu, MenuRange } = require('@grammyjs/menu')
 const mongoose = require('mongoose')
 const AutoIncrement = require('mongoose-sequence')(mongoose)
 
@@ -56,77 +56,192 @@ async function middleCheck(ctx, next) {
     await next()
 }
 
-const charScreen = new Menu('charScreen')
-    .text('Выбрать 1-го', async (ctx) => {
-        if (ctx.account.char[0].equiped) {
-            ctx.deleteMessage()
-            ctx.reply(`Персонаж уже выбран`)
-            return
+const charScreen = new Menu('charScreen', { autoAnswer: false })
+    .dynamic(async (ctx) => {
+        const range = new MenuRange()
+        for (let i = 0; i < ctx.account.char.length; i++) {
+            const char = ctx.account.char[i]
+                ? await chardb.findById(ctx.account.char[i]._id)
+                : null
+            range
+                .text(
+                    `👤 ${char.name}      ${
+                        ctx.account.char[i].equiped ? '✅' : '❌'
+                    }`,
+                    async (ctx) => {
+                        if (ctx.account.char[i].equiped) {
+                            ctx.account.char[i].equiped = false
+                            await ctx.account.save()
+                            ctx.answerCallbackQuery(
+                                `Снят персонаж ${char.name}`
+                            )
+                            ctx.menu.update()
+                            return
+                        }
+                        if (ctx.account.char.find((x) => x.equiped === true))
+                            return ctx.answerCallbackQuery(
+                                `Можно выбрать только 1 активного персонажа`
+                            )
+                        ctx.account.char[i].equiped = true
+                        await ctx.account.save()
+                        ctx.answerCallbackQuery(`Выбран персонаж ${char.name}`)
+                        ctx.menu.update()
+                    }
+                )
+                .row()
         }
-        const char = ctx.account.char[0]
-            ? await chardb.findById(ctx.account.char[0].charid)
-            : null
-        ctx.account.char[0].equiped = true
-        await ctx.account.save()
-        ctx.deleteMessage()
-        ctx.reply(`Выбран персонаж ${char.name}`)
+        return range
     })
     .row()
-    .submenu(
-        (ctx) => getLocale(ctx.account.lang, 'create'),
-        'charCreate',
-        (ctx) => {
-            if (ctx.account.char.length > 0) {
-                ctx.editMessageText(getLocale(ctx.account.lang, 'haveChar'))
-                return
-            }
-            ctx.editMessageText(getLocale(ctx.account.lang, 'createChar'))
-            ctx.session.createChar = 1
+    .dynamic(async (ctx) => {
+        const range = new MenuRange()
+        const hidebutton =
+            ctx.account.char.length > ctx.account.charSlots ? 0 : 1
+        for (let i = 0; i < hidebutton; i++) {
+            range.submenu(
+                (ctx) => getLocale(ctx.account.lang, 'create'),
+                'charCreate',
+                (ctx) => {
+                    ctx.answerCallbackQuery(
+                        'Введите имя персонажа в поле ввода'
+                    )
+                    ctx.editMessageText(
+                        getLocale(ctx.account.lang, 'createChar')
+                    )
+                    ctx.session.createChar = 1
+                }
+            )
         }
-    )
+        return range
+    })
 
 const charCreate = new Menu('charCreate').back(
     (ctx) => getLocale(ctx.account.lang, 'back'),
     async (ctx) => {
         const char = ctx.account.char[0]
-            ? await chardb.findById(ctx.account.char[0].charid)
+            ? await chardb.findById(ctx.account.char[0]._id)
             : null
-        ctx.editMessageText(
-            `${getLocale(ctx.account.lang, 'charList')}\n${
-                char
-                    ? `👤 ${char.name}                 ${
-                          ctx.account.char[0].equiped ? 'Выбран' : 'Не Выбран'
-                      }`
-                    : 'Персонажей Нет'
-            }`
-        )
+        ctx.editMessageText(getLocale(ctx.account.lang, 'charList'))
         ctx.session.createChar = 0
     }
 )
 
 charScreen.register(charCreate)
 
-const menu = new Menu('mainMenu')
+const menu = new Menu('mainMenu', { autoAnswer: false })
     .text(
         (ctx) => getLocale(ctx.account.lang, 'crafts'),
-        (ctx) => ctx.reply('test')
+        (ctx) => ctx.answerCallbackQuery('test')
     )
     .text(
         (ctx) => getLocale(ctx.account.lang, 'market'),
-        (ctx) => ctx.reply('test')
+        (ctx) => ctx.answerCallbackQuery('test')
     )
     .row()
     .text(
-        (ctx) => getLocale(ctx.account.lang, 'char'),
-        (ctx) => ctx.reply('test')
+        (ctx) => getLocale(ctx.account.lang, 'inventory'),
+        (ctx) => ctx.answerCallbackQuery('test')
     )
     .text(
         (ctx) => getLocale(ctx.account.lang, 'setting'),
-        (ctx) => ctx.reply('test')
+        (ctx) => ctx.answerCallbackQuery('test')
+    )
+    .dynamic(async (ctx) => {
+        const range = new MenuRange()
+        const char = ctx.account.char.find((x) => x.equiped === true)
+            ? await chardb.findById(
+                  ctx.account.char.find((x) => x.equiped === true)._id
+              )
+            : 0
+        range.text(
+            (ctx) => getLocale(ctx.account.lang, 'balance', char.balance || 0),
+            (ctx) => ctx.answerCallbackQuery('Ваш баланс')
+        )
+        return range
+    })
+
+const setting = new Menu('setting', { autoAnswer: false })
+    .text(
+        (ctx) => getLocale(ctx.account.lang, 'alert'),
+        async (ctx) => {
+            if (ctx.account.alert === 1) {
+                ctx.account.alert = 0
+                await ctx.account.save()
+                ctx.editMessageText(
+                    getLocale(
+                        ctx.account.lang,
+                        'settingString',
+                        ctx.account.alert == 0 ? '🔕' : '🔔',
+                        ctx.account.lang == 'ru' ? '🇷🇺' : '🇺🇸'
+                    )
+                )
+                return
+            }
+            ctx.account.alert = 1
+            await ctx.account.save()
+            ctx.editMessageText(
+                getLocale(
+                    ctx.account.lang,
+                    'settingString',
+                    ctx.account.alert == 0 ? '🔕' : '🔔',
+                    ctx.account.lang == 'ru' ? '🇷🇺' : '🇺🇸'
+                )
+            )
+        }
     )
     .text(
-        (ctx) => getLocale(ctx.account.lang, 'balance', 0),
-        (ctx) => ctx.reply('test')
+        (ctx) => getLocale(ctx.account.lang, 'lang'),
+        async (ctx) => {
+            if (ctx.account.lang == 'ru') {
+                ctx.account.lang = 'en'
+                await ctx.account.save()
+                ctx.editMessageText(
+                    getLocale(
+                        ctx.account.lang,
+                        'settingString',
+                        ctx.account.alert == 0 ? '🔕' : '🔔',
+                        ctx.account.lang == 'ru' ? '🇷🇺' : '🇺🇸'
+                    )
+                )
+                ctx.reply(
+                    getLocale(
+                        ctx.account.lang,
+                        'changeLang',
+                        ctx.account.first_name
+                    ),
+                    {
+                        reply_markup: {
+                            resize_keyboard: true,
+                            keyboard: keyboardAcc(ctx).build(),
+                        },
+                    }
+                )
+                return
+            }
+            ctx.account.lang = 'ru'
+            await ctx.account.save()
+            ctx.editMessageText(
+                getLocale(
+                    ctx.account.lang,
+                    'settingString',
+                    ctx.account.alert == 0 ? '🔕' : '🔔',
+                    ctx.account.lang == 'ru' ? '🇷🇺' : '🇺🇸'
+                )
+            )
+            ctx.reply(
+                getLocale(
+                    ctx.account.lang,
+                    'changeLang',
+                    ctx.account.first_name
+                ),
+                {
+                    reply_markup: {
+                        resize_keyboard: true,
+                        keyboard: keyboardAcc(ctx).build(),
+                    },
+                }
+            )
+        }
     )
 
 const keyboard = (ctx) =>
@@ -136,7 +251,7 @@ const keyboard = (ctx) =>
         .row()
         .text(getLocale(ctx.from.language_code, 'char'))
         .text(getLocale(ctx.from.language_code, 'setting'))
-        .text(getLocale(ctx.from.language_code, 'balance', 0))
+        .text(getLocale(ctx.from.language_code, 'lang'))
         .row()
         .text(getLocale(ctx.from.language_code, 'menu'))
 
@@ -147,7 +262,7 @@ const keyboardAcc = (ctx) =>
         .row()
         .text(getLocale(ctx.account.lang, 'char'))
         .text(getLocale(ctx.account.lang, 'setting'))
-        .text(getLocale(ctx.account.lang, 'balance', 0))
+        .text(getLocale(ctx.account.lang, 'lang'))
         .row()
         .text(getLocale(ctx.account.lang, 'menu'))
 
@@ -165,6 +280,7 @@ bot.use(
         storage: new MongoStorage.MongoDBAdapter({ collection: collection }),
     }),
     menu,
+    setting,
     charScreen
 )
 
@@ -186,14 +302,23 @@ bot.command('start', async (ctx) => {
             first_name: ctx.from.first_name,
             lang: ctx.from.language_code,
         })
-        ctx.reply(lang.welcome.replace('<user>', ctx.from.first_name), {
-            reply_markup: keyboard(ctx),
+        ctx.reply(getLocale(ctx.account.lang, 'welcome', ctx.from.first_name), {
+            reply_markup: {
+                resize_keyboard: true,
+                keyboard: keyboard(ctx).build(),
+            },
         })
         return
     } else {
-        ctx.reply(lang.welcome.replace('<user>', ctx.account.first_name), {
-            reply_markup: keyboardAcc(ctx),
-        })
+        ctx.reply(
+            getLocale(ctx.account.lang, 'welcome', ctx.account.first_name),
+            {
+                reply_markup: {
+                    resize_keyboard: true,
+                    keyboard: keyboardAcc(ctx).build(),
+                },
+            }
+        )
         return
     }
 })
@@ -203,21 +328,19 @@ bot.on('message', async (ctx) => {
     if (!ctx.account) return
     const charAll = await chardb.find()
     const char = ctx.account.char[0]
-        ? await chardb.findById(ctx.account.char[0].charid)
+        ? await chardb.findById(ctx.account.char[0]._id)
         : null
     const date = new Date(ctx.account._id.getTimestamp())
     let lang = JSON.parse(
         fs.readFileSync(`./lang/${ctx.account.lang}.json`, 'utf-8')
     )
     if (ctx.session.createChar == 1) {
-        if (ctx.message.text.length > 8 || ctx.message.text.length < 5) {
+        if (ctx.message.text.length > 8 || ctx.message.text.length < 3) {
             ctx.reply(lang.ceateForb)
-            ctx.session.createChar = 0
             return
         }
-        if (!ctx.message.text.match(/[0-9a-zA-Z]/g)) {
+        if (!ctx.message.text.match(/^[A-Z][A-Za-z0-9]+$/)) {
             ctx.reply(lang.ceateForb)
-            ctx.session.createChar = 0
             return
         }
         if (!!charAll.find((x) => x.name == ctx.message.text)) {
@@ -230,30 +353,16 @@ bot.on('message', async (ctx) => {
                 name: ctx.message.text,
             })
             .then(async (x) => {
-                ctx.account.char.unshift({ charid: x._id })
+                ctx.account.char.unshift({ _id: x._id })
                 ctx.reply(lang.charCreated.replace('<name>', ctx.message.text))
                 await ctx.account.save()
             })
         ctx.session.createChar = 0
     }
-    if (ctx.message.text == lang.create) {
-        if (ctx.account.char.length > 0) return ctx.reply(lang.haveChar)
-        ctx.reply(lang.createChar)
-        ctx.session.createChar++
-    }
     if (ctx.message.text == getLocale(ctx.account.lang, 'char')) {
-        ctx.reply(
-            `${getLocale(ctx.account.lang, 'charList')}\n${
-                char
-                    ? `👤 ${char.name}                 ${
-                          ctx.account.char[0].equiped ? 'Выбран' : 'Не Выбран'
-                      }`
-                    : 'Персонажей Нет'
-            }`,
-            {
-                reply_markup: charScreen,
-            }
-        )
+        ctx.reply(getLocale(ctx.account.lang, 'charList'), {
+            reply_markup: charScreen,
+        })
     }
     if (ctx.message.text == getLocale(ctx.account.lang, 'menu')) {
         ctx.reply(
@@ -266,9 +375,25 @@ bot.on('message', async (ctx) => {
             { reply_markup: menu }
         )
     }
+    if (ctx.message.text == getLocale(ctx.account.lang, 'setting')) {
+        ctx.reply(
+            getLocale(
+                ctx.account.lang,
+                'settingString',
+                ctx.account.alert == 0 ? '🔕' : '🔔',
+                ctx.account.lang == 'ru' ? '🇷🇺' : '🇺🇸'
+            ),
+            {
+                reply_markup: setting,
+            }
+        )
+    }
     if (ctx.message.text == lang.crafts) {
         ctx.reply(date.toTimeString(), {
-            reply_markup: keyboardAcc(ctx),
+            reply_markup: {
+                resize_keyboard: true,
+                keyboard: keyboardAcc(ctx).build(),
+            },
         })
     }
 })
